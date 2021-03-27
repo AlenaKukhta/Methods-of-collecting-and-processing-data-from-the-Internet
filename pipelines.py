@@ -1,66 +1,50 @@
-# -*- coding: utf-8 -*-
-
 # Define your item pipelines here
 #
 # Don't forget to add your pipeline to the ITEM_PIPELINES setting
 # See: https://docs.scrapy.org/en/latest/topics/item-pipeline.html
 
-from pymongo import MongoClient
+
+# useful for handling different item types with a single interface
+from itemadapter import ItemAdapter
+from scrapy.pipelines.images import ImagesPipeline
+import scrapy
 import hashlib
-import re
+import Image
+import PIL
+from scrapy.utils.python import to_bytes
+from pymongo import MongoClient
+from PIL import Image
 
+class LeroymerlinPipeline:
 
-class JobparserPipeline:
     def __init__(self):
         client = MongoClient('localhost', 27017)
-        self.mongo_base = client.vacancies
+        self.mongo_base = client.leroy
 
     def process_item(self, item, spider):
-        #обработка зарплаты
         collection = self.mongo_base[spider.name]
-
-        item['salary_min'] = None
-        item['salary_max'] = None
-        item['salary_currency'] = None
-
-        if spider.name == 'hhru':
-            if len(item['salary']) == 7:
-                item['salary_min'] = item['salary'][1].replace(u'\xa0', u'')
-                item['salary_max'] = item['salary'][3].replace(u'\xa0', u'')
-                item['salary_currency'] = item['salary'][-2]
-            elif len(item['salary']) == 5:
-                item['salary_currency'] = item['salary'][-2]
-                if 'от' in item['salary'][0]:
-                    item['salary_min'] = item['salary'][1].replace(u'\xa0', u'')
-                elif 'до' in item['salary'][0]:
-                    item['salary_max'] = item['salary'][1].replace(u'\xa0', u'')
-
-        if spider.name == 'sjru':
-            if len(item['salary']) == 4:
-                item['salary_currency'] = item['salary'][-1]
-                item['salary_min'] = item['salary'][0].replace(u'\xa0', u'')
-                item['salary_max'] = item['salary'][1].replace(u'\xa0', u'')
-
-            elif len(item['salary']) == 3:
-                item['salary'][2] = item['salary'][2].replace(u'\xa0', u'')
-                item['salary_currency'] = re.findall('[a-zA-Zа-яА-Я]+', item['salary'][2])[0]
-                item['salary_min'] = item['salary'][0].replace(u'\xa0', u'')
-                item['salary_max'] = item['salary'][0].replace(u'\xa0', u'')
-
-                if 'от' in item['salary']:
-                    item['salary_min'] = re.findall('\d+', item['salary'][2])
-                elif 'до' in item['salary']:
-                    item['salary_max'] = re.findall('\d+', item['salary'][2])
-
-        if item['salary_min']:
-            item['salary_min'] = int(item['salary_min'])
-
-        if item['salary_max']:
-            item['salary_max'] = int(item['salary_max'])
-
-        item['_id'] = hashlib.sha1(item['link'].split('?')[0].encode()).hexdigest()
-        item['site'] = spider.name
-        del item['salary']
-
-        collection.update_one({"_id": item['_id']}, {'$set': item}, upsert=True)
+        collection.insert(item)
         return item
+
+
+class LeroymerlinPhotoPipeline(ImagesPipeline):
+
+    def get_media_requests(self, item, info):
+        if item['photos']:
+            for photo in item['photos']:
+                try:
+                    yield scrapy.Request(photo)
+                except Exception as e:
+                    print(e)
+        return item
+
+    def item_completed(self, results, item, info):
+        if results:
+            item['photos'] = [i[1] for i in results if i[0]]
+        return item
+
+    def file_path(self, request, response=None, info=None, *, item=None):
+        img_folder = item['name']
+        image_guid = hashlib.sha1(to_bytes(request.url)).hexdigest()
+        result = f'/{img_folder}/{image_guid}.jpg'
+        return result
