@@ -1,50 +1,34 @@
+# -*- coding: utf-8 -*-
+
 # Define your item pipelines here
 #
 # Don't forget to add your pipeline to the ITEM_PIPELINES setting
 # See: https://docs.scrapy.org/en/latest/topics/item-pipeline.html
+from pymongo import MongoClient, errors
 
 
-# useful for handling different item types with a single interface
-from itemadapter import ItemAdapter
-from scrapy.pipelines.images import ImagesPipeline
-import scrapy
-import hashlib
-import Image
-import PIL
-from scrapy.utils.python import to_bytes
-from pymongo import MongoClient
-from PIL import Image
-
-class LeroymerlinPipeline:
-
-    def __init__(self):
+class InstaparserPipeline:
+    def __init__(self):                             # Конструктор для инициализации подключения к СУБД
         client = MongoClient('localhost', 27017)
-        self.mongo_base = client.leroy
+        self.mongo_base = client.instagram
+
+    def add_to_db(self, item, collection_name):
+        collection = self.mongo_base[collection_name]  # Выбор коллекции по имени паука
+        collection.update_one({'_id': item['_id']}, {'$set': item}, upsert=True)  # Добавление в базу данных
+        pass
 
     def process_item(self, item, spider):
-        collection = self.mongo_base[spider.name]
-        collection.insert(item)
+        collection_name = spider.name  # Выбор коллекции по имени паука
+        user = {
+            '_id': item['user_id'],
+            'user_id': item['user_id'],
+            'user_name': item['user_name'],
+            'full_name': item['full_name'],
+            'photo': item['photo'],
+            'is_followed_by': item['is_followed_by'],
+            'follows': item['follows']
+        }
+
+        self.add_to_db(user, collection_name)
+
         return item
-
-
-class LeroymerlinPhotoPipeline(ImagesPipeline):
-
-    def get_media_requests(self, item, info):
-        if item['photos']:
-            for photo in item['photos']:
-                try:
-                    yield scrapy.Request(photo)
-                except Exception as e:
-                    print(e)
-        return item
-
-    def item_completed(self, results, item, info):
-        if results:
-            item['photos'] = [i[1] for i in results if i[0]]
-        return item
-
-    def file_path(self, request, response=None, info=None, *, item=None):
-        img_folder = item['name']
-        image_guid = hashlib.sha1(to_bytes(request.url)).hexdigest()
-        result = f'/{img_folder}/{image_guid}.jpg'
-        return result
